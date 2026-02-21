@@ -147,7 +147,7 @@ export class FugitiveKingService {
     console.log('[prepareStartGame] Found', authEntries.length, 'auth entries in simulation');
 
     // Find Player 1's stubbed auth entry
-    let player1AuthEntry = null;
+    let player1AuthEntry: any = null;
 
     console.log('[prepareStartGame] Looking for auth entry for Player 1:', player1);
 
