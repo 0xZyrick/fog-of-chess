@@ -269,7 +269,16 @@ const LanternChess = () => {
       {/* Header */}
       <div className="bg-gray-950 border-b border-gray-800 px-6 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
-          <span className="font-bold tracking-tighter text-lg text-blue-400">LANTERN CHESS</span>
+          <div className="flex items-center gap-2">
+            {/* Logo — chess piece lantern icon */}
+            <div className="w-8 h-8 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-lg">
+              ♟
+            </div>
+            <div className="flex flex-col leading-none">
+              <span className="font-bold tracking-tighter text-lg text-blue-400">LANTERN CHESS</span>
+              <span className="text-[9px] text-gray-500 tracking-widest uppercase">ZK Fog of Chess</span>
+            </div>
+          </div>
           <div className={`px-2 py-0.5 rounded text-[10px] font-bold ${isBoardSealed ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
             {isBoardSealed ? '• ON-CHAIN' : '• LOCAL'}
           </div>
