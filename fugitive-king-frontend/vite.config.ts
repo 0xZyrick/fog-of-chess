@@ -17,9 +17,8 @@ export default defineConfig({
   resolve: {
   alias: {
     '@': path.resolve(__dirname, './src'),
-    'vite-plugin-node-polyfills/shims/buffer': path.resolve(__dirname, './node_modules/buffer/index.js'),
+    'vite-plugin-node-polyfills/shims/buffer': path.resolve(__dirname, './src/shims/buffer.js'),
   },
-  dedupe: ['@stellar/stellar-sdk']
 },
 optimizeDeps: {
     include: ['@stellar/stellar-sdk', 'buffer'],
