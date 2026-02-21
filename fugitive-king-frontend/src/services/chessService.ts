@@ -1,38 +1,49 @@
-// Use a relative path if the 'bun add' linking hasn't finished yet
-import * as FogOfChess from '../../../packages/fog-of-chess'; 
+import { Client as FogOfChessClient } from 'board_commitment_contract';
 import { Buffer } from 'buffer';
 
-// The Contract ID you just deployed
-const CONTRACT_ID = 'CAWXNLVXEYY7C74M5B2YCUWN3M5H4JGNOQDAJKKDZJ6KZ2KJE4AZ2FTG';
+const CONTRACT_ID = 'CCEPFHPTYYKBTAXVSS73Y757JR53YGQCPXGYEO7DDUU5LA4SGQDXH3HT';
 
-// Manually define Testnet details since the constants file is missing
 const TESTNET_DETAILS = {
   networkPassphrase: 'Test SDF Network ; September 2015',
-  rpcUrl: 'https://soroban-testnet.stellar.org:443',
+  rpcUrl: 'https://soroban-testnet.stellar.org',
 };
 
-export const chessClient = new FogOfChess.Client({
-  ...TESTNET_DETAILS,
-  contractId: CONTRACT_ID,
-});
+export const getChessClient = (publicKey: string) =>
+  new FogOfChessClient({
+    ...TESTNET_DETAILS,
+    contractId: CONTRACT_ID,
+    publicKey,
+  });
 
-export const commitBoard = async (userAddress: string, boardHash: string) => {
+export const commitBoard = async (
+  userAddress: string,
+  boardHash: string,
+  signTransaction: (xdr: string, opts: any) => Promise<{ signedTxXdr: string }>
+) => {
   try {
-    // 1. Convert your hex string into a 32-byte Buffer
-    // This removes the '0x' if it exists and converts the rest
     const cleanHash = boardHash.startsWith('0x') ? boardHash.slice(2) : boardHash;
     const hashBuffer = Buffer.from(cleanHash, 'hex');
 
-    // 2. Pass the Buffer instead of the string
-    const tx = await chessClient.commit_board({
+    const client = getChessClient(userAddress);
+    const tx = await client.commit_board({
       player_id: userAddress,
-      poseidon_hash: hashBuffer, // No more type error!
+      poseidon_hash: hashBuffer as unknown as any,
     });
-    
-    const result = await tx.signAndSend();
-    return result;
+
+    if (!tx.built) {
+      throw new Error('Transaction simulation failed — built is undefined');
+    }
+
+    const { Networks, TransactionBuilder } = await import('@stellar/stellar-sdk');
+    const { Server } = await import('@stellar/stellar-sdk/rpc');
+    const result = await signTransaction(tx.built.toXDR(), {
+      networkPassphrase: Networks.TESTNET,
+    });
+    const server = new Server(TESTNET_DETAILS.rpcUrl);
+    const signedTx = TransactionBuilder.fromXDR(result.signedTxXdr, Networks.TESTNET);
+    return server.sendTransaction(signedTx);
   } catch (error) {
-    console.error("Board commitment failed:", error);
+    console.error('Board commitment failed:', error);
     throw error;
   }
 };
