@@ -4,11 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
-  },
+  "postinstall": "mkdir -p node_modules/vite-plugin-node-polyfills/shims && echo 'export { Buffer } from \"buffer\";' > node_modules/vite-plugin-node-polyfills/shims/buffer.js",
+  "dev": "vite",
+  "build": "tsc -b && vite build",
+  "lint": "eslint .",
+  "preview": "vite preview"
+},
   "dependencies": {
     "@creit-tech/stellar-wallets-kit": "npm:@jsr/creit-tech__stellar-wallets-kit@2.0.0-beta.5",
     "@stellar/freighter-api": "^6.0.1",
