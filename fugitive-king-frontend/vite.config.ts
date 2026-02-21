@@ -17,7 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      // Fixed the incomplete path here
+      'vite-plugin-node-polyfills/shims/buffer': 'buffer',
     },
     dedupe: ['@stellar/stellar-sdk']
   },
