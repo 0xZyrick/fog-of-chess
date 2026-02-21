@@ -15,19 +15,21 @@ export default defineConfig({
   ],
   envDir: '..',
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-      'vite-plugin-node-polyfills/shims/buffer': 'buffer',
-    },
-    dedupe: ['@stellar/stellar-sdk']
+  alias: {
+    '@': path.resolve(__dirname, './src'),
+    'vite-plugin-node-polyfills/shims/buffer': path.resolve(__dirname, './node_modules/buffer/index.js'),
   },
-  optimizeDeps: {
+  dedupe: ['@stellar/stellar-sdk']
+},
+optimizeDeps: {
     include: ['@stellar/stellar-sdk', 'buffer'],
+    exclude: ['vite-plugin-node-polyfills'],
   },
   build: {
     commonjsOptions: {
       transformMixedEsModules: true
     }
+    
   },
   server: {
     port: 3000,
