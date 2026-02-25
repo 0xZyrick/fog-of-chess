@@ -10,7 +10,7 @@ import { Client as FogOfChessClient } from 'board_commitment_contract';
 import { Networks as StellarNetworks } from '@stellar/stellar-sdk';
 import { broadcastMove, subscribeMoves } from './supabaseClient';
 
-const CONTRACT_ID = "CCEPFHPTYYKBTAXVSS73Y757JR53YGQCPXGYEO7DDUU5LA4SGQDXH3HT";
+const CONTRACT_ID = "CCBL5BNUPBW7HMHCZAQFIC6VTW7HACS2FWCOL3MGWGTZC4QLRVPD6S6O";
 const RPC_URL     = "https://soroban-testnet.stellar.org";
 const zkManager   = new ZKServiceManager(CONTRACT_ID);
 const TURN_TIME   = 300;
@@ -70,7 +70,7 @@ const LanternChess = () => {
 
   // Timer
   useEffect(() => {
-    if (!gameStarted || gameOver) return;
+    if (!gameStarted || gameOver || isVerifying) return;
     const id = setInterval(() => {
       if (currentPlayerRef.current === 'white') {
         setWhiteTime(t => { if (t<=1){ setGameOver(true); setWinner('Black'); return 0; } return t-1; });
@@ -191,13 +191,22 @@ const LanternChess = () => {
   };
 
   const handleEndGame = async (whiteWon) => {
-    try {
-      addLog('Recording result on-chain...');
-      const tx = await getClient().end_game({ session_id: sessionId, caller: address, player1_won: whiteWon });
-      await signAndSubmit(tx);
-      addLog('Result recorded ✓');
-    } catch(e) { addLog('ERROR: Record failed'); }
-  };
+  if (!address) return;
+  try {
+    addLog('Recording result on-chain...');
+    const client = getClient();
+    const tx = await client.end_game({
+      session_id: sessionId, caller: address, player1_won: whiteWon,
+    });
+    await signAndSubmit(tx);
+    addLog('Result recorded on-chain ✓');
+  } catch (e) {
+    // This fires if proofs don't match commitments
+    addLog('ERROR: Result rejected — proof mismatch. Game result not saved.');
+    showToast('⚠ Game result could not be verified on-chain', 'error');
+    console.error(e);
+  }
+};
 
   const handleTileClick = async (row, col) => {
     if (isVerifying || isCommitting || gameOver) return;
@@ -341,9 +350,9 @@ const LanternChess = () => {
             </div>
             <input type="text" placeholder="Player 2 address (G...)"
               value={player2Address} onChange={e => setPlayer2Address(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 rounded text-xs font-mono border border-gray-700 focus:border-blue-500 outline-none"/>
+              className="w-full px-3 py-2 bg-gray-800 rounded text-xs text-white placeholder-gray-500 font-mono border border-gray-700 focus:border-blue-500 outline-none"/>
             <button onClick={handleStartGame} disabled={isCommitting}
-              className="w-full py-2.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 rounded-lg text-xs font-bold">
+              className="w-full py-2.5 text-white placeholder-gray-500 bg-green-700 hover:bg-green-600 disabled:opacity-50 rounded-lg text-xs font-bold">
               {isCommitting ? 'Setting up...' : 'Confirm & Start'}
             </button>
           </div>
@@ -352,9 +361,9 @@ const LanternChess = () => {
             <p className="text-[10px] text-gray-400 font-semibold">Join Existing Game</p>
             <input type="text" placeholder="Session ID from opponent"
               value={joinSessionId} onChange={e => setJoinSessionId(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 rounded text-xs font-mono border border-gray-700 focus:border-blue-500 outline-none"/>
+              className="w-full px-3 py-2 bg-gray-800 text-white placeholder-gray-500 rounded text-xs font-mono border border-gray-700 focus:border-blue-500 outline-none"/>
             <button onClick={handleJoinGame} disabled={isCommitting}
-              className="w-full py-2.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 rounded-lg text-xs font-bold">
+              className="w-full py-2.5 text-white placeholder-gray-500 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 rounded-lg text-xs font-bold">
               {isCommitting ? 'Joining...' : 'Join Game'}
             </button>
           </div>

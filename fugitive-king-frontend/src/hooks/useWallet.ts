@@ -26,26 +26,36 @@ export function useWallet() {
     disconnect: storeDisconnect,
   } = useWalletStore();
 
-  /**
-   * Connect with Freighter wallet (real wallet — production)
-   */
   const connectFreighter = useCallback(async () => {
     try {
       setConnecting(true);
       setError(null);
 
-      // Check Freighter is installed
       const { isConnected: installed } = await freighterIsConnected();
       if (!installed) {
         throw new Error('Freighter not installed. Get it at freighter.app');
       }
 
-      // Request access — opens Freighter popup
-      const result = await requestAccess();
+      // Retry up to 3 times — Freighter extension context sometimes closes early
+      let pk: string | null = null;
+      let lastError: Error | null = null;
 
-      // v6 returns { address } not { publicKey }
-      const pk = (result as any).address || (result as any).publicKey;
-      if (!pk) throw new Error('No address returned from Freighter');
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const result = await requestAccess();
+          pk = (result as any).address || (result as any).publicKey || null;
+          if (pk) break;
+          // Got a response but no address — wait and retry
+          await new Promise(r => setTimeout(r, 600));
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          if (attempt < 3) await new Promise(r => setTimeout(r, 600));
+        }
+      }
+
+      if (!pk) {
+        throw lastError || new Error('Freighter did not return an address — try clicking Connect again');
+      }
 
       setWallet(pk, 'freighter', 'wallet');
       setNetwork(NETWORK, NETWORK_PASSPHRASE);
@@ -59,9 +69,6 @@ export function useWallet() {
     }
   }, [setWallet, setConnecting, setNetwork, setError]);
 
-  /**
-   * Connect as a dev player (for testing only)
-   */
   const connectDev = useCallback(
     async (playerNumber: 1 | 2) => {
       try {
@@ -108,9 +115,6 @@ export function useWallet() {
     storeDisconnect();
   }, [walletType, storeDisconnect]);
 
-  /**
-   * Get a signer — works for both Freighter and dev wallet
-   */
   const getContractSigner = useCallback((): ContractSigner => {
     if (!isConnected || !publicKey || !walletType) {
       throw new Error('Wallet not connected');
@@ -120,7 +124,6 @@ export function useWallet() {
       return devWalletService.getSigner();
     }
 
-    // Freighter signer
     return {
       signTransaction: async (txXdr: string, opts?: any) => {
         const result = await freighterSignTransaction(txXdr, {
@@ -133,36 +136,22 @@ export function useWallet() {
         return { signedTxXdr, signerAddress: publicKey };
       },
       signAuthEntry: async (preimageXdr: string) => {
-        // Freighter v6 doesn't expose signAuthEntry directly
-        // Return as-is — contract will handle unsigned auth entries
         return { signedAuthEntry: preimageXdr, signerAddress: publicKey };
       },
     };
   }, [isConnected, publicKey, walletType]);
 
-  const isDevModeAvailable = useCallback(() => DevWalletService.isDevModeAvailable(), []);
+  const isDevModeAvailable  = useCallback(() => DevWalletService.isDevModeAvailable(), []);
   const isDevPlayerAvailable = useCallback((n: 1 | 2) => DevWalletService.isPlayerAvailable(n), []);
-  const getCurrentDevPlayer = useCallback(() => {
+  const getCurrentDevPlayer  = useCallback(() => {
     if (walletType !== 'dev') return null;
     return devWalletService.getCurrentPlayer();
   }, [walletType]);
 
   return {
-    publicKey,
-    walletId,
-    walletType,
-    isConnected,
-    isConnecting,
-    network,
-    networkPassphrase,
-    error,
-    connectFreighter,
-    connectDev,
-    switchPlayer,
-    disconnect,
-    getContractSigner,
-    isDevModeAvailable,
-    isDevPlayerAvailable,
-    getCurrentDevPlayer,
+    publicKey, walletId, walletType, isConnected, isConnecting,
+    network, networkPassphrase, error,
+    connectFreighter, connectDev, switchPlayer, disconnect,
+    getContractSigner, isDevModeAvailable, isDevPlayerAvailable, getCurrentDevPlayer,
   };
 }

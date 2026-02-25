@@ -1,7 +1,7 @@
 import { Client as FogOfChessClient } from 'board_commitment_contract';
 import { Buffer } from 'buffer';
 
-const CONTRACT_ID = 'CCEPFHPTYYKBTAXVSS73Y757JR53YGQCPXGYEO7DDUU5LA4SGQDXH3HT';
+const CONTRACT_ID = 'CCBL5BNUPBW7HMHCZAQFIC6VTW7HACS2FWCOL3MGWGTZC4QLRVPD6S6O';
 
 const TESTNET_DETAILS = {
   networkPassphrase: 'Test SDF Network ; September 2015',
