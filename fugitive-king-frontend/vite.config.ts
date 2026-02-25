@@ -9,11 +9,16 @@ export default defineConfig({
     {
       name: 'node-polyfills-shim',
       resolveId(id) {
-        if (id === 'vite-plugin-node-polyfills/shims/buffer') return id;
+        if (id === 'vite-plugin-node-polyfills/shims/buffer') return '\0buffer-shim';
+        if (id === 'buffer') return '\0buffer-shim';
       },
       load(id) {
-        if (id === 'vite-plugin-node-polyfills/shims/buffer') {
-          return 'export { Buffer } from "buffer";';
+        if (id === '\0buffer-shim') {
+          return `
+            import { Buffer as _Buffer } from 'node:buffer';
+            export { _Buffer as Buffer };
+            export default { Buffer: _Buffer };
+          `;
         }
       },
     },
