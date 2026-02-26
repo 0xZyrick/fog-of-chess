@@ -10,7 +10,7 @@ import { Client as FogOfChessClient } from 'board_commitment_contract';
 import { Networks as StellarNetworks } from '@stellar/stellar-sdk';
 import { broadcastMove, subscribeMoves } from './supabaseClient';
 
-const CONTRACT_ID = "CCEPFHPTYYKBTAXVSS73Y757JR53YGQCPXGYEO7DDUU5LA4SGQDXH3HT";
+const CONTRACT_ID = "CCBL5BNUPBW7HMHCZAQFIC6VTW7HACS2FWCOL3MGWGTZC4QLRVPD6S6O";
 const RPC_URL     = "https://soroban-testnet.stellar.org";
 const zkManager   = new ZKServiceManager(CONTRACT_ID);
 const TURN_TIME   = 300;
@@ -70,7 +70,7 @@ const LanternChess = () => {
 
   // Timer
   useEffect(() => {
-    if (!gameStarted || gameOver) return;
+    if (!gameStarted || gameOver || isVerifying || isCommitting) return;
     const id = setInterval(() => {
       if (currentPlayerRef.current === 'white') {
         setWhiteTime(t => { if (t<=1){ setGameOver(true); setWinner('Black'); return 0; } return t-1; });
@@ -96,16 +96,12 @@ const LanternChess = () => {
       const opponentPiece = currentPieces.find(p => p.row === move.from_row && p.col === move.from_col);
       const targetPiece   = currentPieces.find(p => p.row === move.to_row   && p.col === move.to_col);
 
-      console.log('[Sync] Move received:', move);
-      console.log('[Sync] Found piece at from:', opponentPiece);
-      console.log('[Sync] Pieces count:', currentPieces.length);
 
       if (opponentPiece && executeMoveRef.current) {
         executeMoveRef.current(opponentPiece.id, move.to_row, move.to_col, move.is_capture);
         if (addLogRef.current) addLogRef.current(`Opponent moved → [${move.to_row},${move.to_col}]`);
         setIsMyTurn(true);
       } else {
-        console.warn('[Sync] Could not find piece or executeMove:', { opponentPiece, hasExecute: !!executeMoveRef.current });
       }
 
       if (move.is_capture && targetPiece?.type === 'king') {
@@ -341,7 +337,7 @@ const LanternChess = () => {
             </div>
             <input type="text" placeholder="Player 2 address (G...)"
               value={player2Address} onChange={e => setPlayer2Address(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 rounded text-xs font-mono border border-gray-700 focus:border-blue-500 outline-none"/>
+              className="w-full px-3 py-2 bg-gray-800 rounded text-xs font-mono text-white placeholder-gray-500 border border-gray-700 focus:border-blue-500 outline-none"/>
             <button onClick={handleStartGame} disabled={isCommitting}
               className="w-full py-2.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 rounded-lg text-xs font-bold">
               {isCommitting ? 'Setting up...' : 'Confirm & Start'}
@@ -352,7 +348,7 @@ const LanternChess = () => {
             <p className="text-[10px] text-gray-400 font-semibold">Join Existing Game</p>
             <input type="text" placeholder="Session ID from opponent"
               value={joinSessionId} onChange={e => setJoinSessionId(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 rounded text-xs font-mono border border-gray-700 focus:border-blue-500 outline-none"/>
+              className="w-full px-3 py-2 bg-gray-800 rounded text-xs font-mono text-white placeholder-gray-500 border border-gray-700 focus:border-blue-500 outline-none"/>
             <button onClick={handleJoinGame} disabled={isCommitting}
               className="w-full py-2.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 rounded-lg text-xs font-bold">
               {isCommitting ? 'Joining...' : 'Join Game'}
