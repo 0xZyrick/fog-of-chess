@@ -6,7 +6,7 @@ use soroban_sdk::{
 
 // ── Nethermind RISC Zero Groth16 Verifier (already deployed on testnet) ──────
 // https://github.com/NethermindEth/stellar-risc0-verifier
-const NETHERMIND_VERIFIER_ID: &str = "CDAEGIJHTD7Y3CQW6UY2EWVG5SOPATAYAHT6KQ7VL3WULPYJ6MHQH4TY";
+const NETHERMIND_VERIFIER_ID: &str = "CBY3GOBGQXDGRR4K2KYJO2UOXDW5NRW6UKIQHUBNBNU2V3BXQBXGTVX7";
 
 mod risc0_verifier {
     use soroban_sdk::contractimport;

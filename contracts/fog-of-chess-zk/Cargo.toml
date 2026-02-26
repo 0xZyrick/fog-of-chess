@@ -7,14 +7,5 @@ members = ["host", "methods"]
 opt-level = 3
 
 [profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-panic = "abort"
-codegen-units = 1
+debug = 1
 lto = true
-
-[profile.release-with-logs]
-inherits = "release"
-debug-assertions = true

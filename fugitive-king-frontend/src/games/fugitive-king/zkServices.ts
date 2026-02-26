@@ -18,14 +18,12 @@
 import { TransactionBuilder, Networks } from '@stellar/stellar-sdk';
 import { Server } from '@stellar/stellar-sdk/rpc';
 
-// const CONTRACT_ID   = "CCEPFHPTYYKBTAXVSS73Y757JR53YGQCPXGYEO7DDUU5LA4SGQDXH3HT";
-const CONTRACT_ID   = "CCBL5BNUPBW7HMHCZAQFIC6VTW7HACS2FWCOL3MGWGTZC4QLRVPD6S6O";
+const CONTRACT_ID   = "CCEPFHPTYYKBTAXVSS73Y757JR53YGQCPXGYEO7DDUU5LA4SGQDXH3HT";
 const RPC_URL       = "https://soroban-testnet.stellar.org";
 const PROVER_URL    = import.meta.env.VITE_PROVER_URL || 'http://localhost:3001';
 
 // Nethermind verifier already on testnet — used by the Soroban contract internally
-// export const NETHERMIND_VERIFIER = "CBY3GOBGQXDGRR4K2KYJO2UOXDW5NRW6UKIQHUBNBNU2V3BXQBXGTVX7";
-export const NETHERMIND_VERIFIER = "CDAEGIJHTD7Y3CQW6UY2EWVG5SOPATAYAHT6KQ7VL3WULPYJ6MHQH4TY";
+export const NETHERMIND_VERIFIER = "CBY3GOBGQXDGRR4K2KYJO2UOXDW5NRW6UKIQHUBNBNU2V3BXQBXGTVX7";
 
 export interface ProofResult {
   seal:           string;  // selector + groth16 proof (or mock)
@@ -114,14 +112,9 @@ export class ZKServiceManager {
 
       const tx = await client.commit_board({
         player_id:    playerAddress,
-        poseidon_hash:commitmentBytes as any,
+        poseidon_hash:Array.from(commitmentBytes) as any,
       });
-      const signed = await signer.signTransaction(tx.built!.toXDR(), { networkPassphrase: Networks.TESTNET });
-      const { Server } = await import('@stellar/stellar-sdk/rpc');
-      const server = new Server('https://soroban-testnet.stellar.org');
-      await server.sendTransaction(
-        (await import('@stellar/stellar-sdk')).TransactionBuilder.fromXDR(signed.signedTxXdr, Networks.TESTNET)
-      );
+      await signer.signTransaction(tx.built!.toXDR(), { networkPassphrase: Networks.TESTNET });
       console.log('Board committed on-chain ✓');
     } catch (e: any) {
       // AlreadyCommitted error (code 1) is fine — board was previously committed
