@@ -39,7 +39,6 @@ const isPathClear = (
   return true;
 };
 
-// ── Raw move validity — no check-exposure guard, no recursion ────────────────
 const isRawMoveValid = (
   piece: Piece,
   toRow: number,
@@ -62,12 +61,9 @@ const isRawMoveValid = (
     case 'pawn': {
       const dir = color === 'white' ? -1 : 1;
       const startRow = color === 'white' ? 6 : 1;
-      // Forward one
       if (dc === 0 && dr === dir) return !target;
-      // Forward two from start
       if (dc === 0 && dr === dir * 2 && row === startRow)
         return !pieceAt(pieces, row + dir, col) && !target;
-      // Diagonal capture
       if (absDc === 1 && dr === dir) return !!(target && target.color !== color);
       return false;
     }
@@ -86,7 +82,6 @@ const isRawMoveValid = (
   }
 };
 
-// ── Check detector — uses raw moves only, no recursion ──────────────────────
 export const isInCheck = (color: PieceColor, pieces: Piece[]): boolean => {
   const king = pieces.find(p => p.type === 'king' && p.color === color);
   if (!king) return false;
@@ -96,21 +91,10 @@ export const isInCheck = (color: PieceColor, pieces: Piece[]): boolean => {
     .some(p => isRawMoveValid(p, king.row, king.col, pieces));
 };
 
-// ── Simulate a move and test if it leaves own king in check ──────────────────
-const moveLeavesKingInCheck = (
-  piece: Piece,
-  toRow: number,
-  toCol: number,
-  pieces: Piece[]
-): boolean => {
-  // Apply the move on a temporary board
-  const next = pieces
-    .filter(p => !(p.row === toRow && p.col === toCol && p.id !== piece.id))
-    .map(p => p.id === piece.id ? { ...p, row: toRow, col: toCol } : p);
-  return isInCheck(piece.color, next);
-};
-
-// ── Full move validation with check-exposure guard ───────────────────────────
+// ── Full move validation ──────────────────────────────────────────────────────
+// Lantern Chess fog-of-war rules: check is a WARNING only.
+// Players are NOT forced to resolve check — the opponent must capture the king to win.
+// moveLeavesKingInCheck has been intentionally removed.
 export const isValidMove = (
   piece: Piece,
   toRow: number,
@@ -118,7 +102,6 @@ export const isValidMove = (
   pieces: Piece[]
 ): MoveResult => {
   if (!isRawMoveValid(piece, toRow, toCol, pieces)) {
-    // Reproduce specific reason for UI feedback
     const { row, col, type, color } = piece;
     if (!inBounds(toRow, toCol)) return { valid: false, reason: 'Out of bounds' };
     if (row === toRow && col === toCol) return { valid: false, reason: 'Same square' };
@@ -133,8 +116,7 @@ export const isValidMove = (
         const dir = color === 'white' ? -1 : 1;
         if (Math.abs(dc) === 1 && dr === dir && !target)
           return { valid: false, reason: 'Pawn can only move diagonally to capture' };
-        if (dc !== 0)
-          return { valid: false, reason: 'Invalid pawn move' };
+        if (dc !== 0) return { valid: false, reason: 'Invalid pawn move' };
         if (!isPathClear(pieces, row, col, toRow, toCol))
           return { valid: false, reason: 'Pawn blocked' };
         return { valid: false, reason: 'Invalid pawn move' };
@@ -154,11 +136,6 @@ export const isValidMove = (
       case 'king':
         return { valid: false, reason: 'King moves one square at a time' };
     }
-  }
-
-  // Raw move is valid — now check if it exposes own king
-  if (moveLeavesKingInCheck(piece, toRow, toCol, pieces)) {
-    return { valid: false, reason: 'That move leaves your king in check' };
   }
 
   return { valid: true };

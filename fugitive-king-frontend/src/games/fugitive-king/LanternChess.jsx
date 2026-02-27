@@ -9,6 +9,8 @@ import { Server } from '@stellar/stellar-sdk/rpc';
 import { Client as FogOfChessClient } from 'board_commitment_contract';
 import { Networks as StellarNetworks } from '@stellar/stellar-sdk';
 import { broadcastMove, subscribeMoves } from './supabaseClient';
+import { isValidMove } from './chessLogic';
+import { computeCommitment } from './zkServices';
 
 const CONTRACT_ID = "CCBL5BNUPBW7HMHCZAQFIC6VTW7HACS2FWCOL3MGWGTZC4QLRVPD6S6O";
 const RPC_URL     = "https://soroban-testnet.stellar.org";
@@ -22,6 +24,48 @@ const Toast = ({ message, type }) => {
   if (!message) return null;
   const colors = { error:'bg-red-700/90 border-red-500/50 text-red-100', success:'bg-green-700/90 border-green-500/50 text-green-100', zk:'bg-blue-700/90 border-blue-500/50 text-blue-100', chain:'bg-purple-700/90 border-purple-500/50 text-purple-100', default:'bg-gray-800/90 border-gray-600/50 text-gray-100' };
   return <div className={`fixed top-14 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg border backdrop-blur text-xs font-bold shadow-xl pointer-events-none text-center max-w-[80vw] ${colors[type]||colors.default}`}>{message}</div>;
+};
+
+// ── Game Over Overlay ─────────────────────────────────────────────────────────
+const GameOverOverlay = ({ winner, myColor, sessionId, onPlayAgain, onClose }) => {
+  const isWinner = (myColor === 'white' && winner === 'White') || (myColor === 'black' && winner === 'Black');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)' }}>
+      <div className="flex flex-col items-center gap-5 px-6 py-8 mx-4 rounded-2xl border max-w-sm w-full text-center"
+        style={{ background: '#0d1117', borderColor: isWinner ? 'rgba(251,191,36,0.4)' : 'rgba(99,102,241,0.3)' }}>
+        <div className="text-5xl" style={{ filter: isWinner ? 'drop-shadow(0 0 20px rgba(251,191,36,0.8))' : 'none' }}>
+          {isWinner ? '♔' : '♚'}
+        </div>
+        <div>
+          <div className={`text-2xl font-bold ${isWinner ? 'text-yellow-400' : 'text-gray-300'}`}>
+            {isWinner ? 'You Win!' : 'You Lost'}
+          </div>
+          <div className="text-sm text-gray-500 mt-1">{winner} wins the game</div>
+        </div>
+        <div className="w-full bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
+          <div className="text-[9px] text-gray-600 uppercase tracking-wider mb-0.5">Session</div>
+          <div className="text-xs font-mono text-blue-400">{sessionId}</div>
+        </div>
+        <div className="flex flex-col gap-2 w-full">
+          <button onClick={onPlayAgain}
+            className="w-full py-3 rounded-xl text-sm font-bold text-white active:scale-95"
+            style={{ background: 'linear-gradient(135deg, #1d4ed8, #7c3aed)' }}>
+            ♟ Play Again
+          </button>
+          <button onClick={onClose}
+            className="w-full py-2.5 rounded-xl text-sm font-bold bg-gray-800 hover:bg-gray-700 text-gray-300 active:scale-95">
+            ✕ Close
+          </button>
+        </div>
+        <a href="https://stellar.expert/explorer/testnet/contract/CCBL5BNUPBW7HMHCZAQFIC6VTW7HACS2FWCOL3MGWGTZC4QLRVPD6S6O"
+          target="_blank" rel="noopener noreferrer"
+          className="text-[10px] text-gray-600 hover:text-purple-400 transition-colors">
+          🔗 Verify on Stellar
+        </a>
+      </div>
+    </div>
+  );
 };
 
 const LanternChess = () => {
@@ -46,7 +90,7 @@ const LanternChess = () => {
   const [myColor,        setMyColor]        = useState(null);
   const [isMyTurn,       setIsMyTurn]       = useState(false);
   const [opponentOnline, setOpponentOnline] = useState(false);
-  const [activeTab,      setActiveTab]      = useState('board'); // mobile: 'board' | 'game'
+  const [activeTab,      setActiveTab]      = useState('board');
 
   // refs to avoid stale closures in subscriptions
   const lastProcessedMove  = useRef(-1);
@@ -56,7 +100,7 @@ const LanternChess = () => {
   const moveCountRef       = useRef(moveCount);
   const executeMoveRef     = useRef(null);
   const addressRef         = useRef(address);
-  const setIsMyTurnRef     = useRef(null);
+  const addLogRef          = useRef(null);  // FIX: declared here, not inside callback
 
   useEffect(() => { piecesRef.current        = pieces;        }, [pieces]);
   useEffect(() => { myColorRef.current       = myColor;       }, [myColor]);
@@ -64,13 +108,12 @@ const LanternChess = () => {
   useEffect(() => { moveCountRef.current     = moveCount;     }, [moveCount]);
   useEffect(() => { executeMoveRef.current   = executeMove;   }, [executeMove]);
   useEffect(() => { addressRef.current       = address;       }, [address]);
-  useEffect(() => { setIsMyTurnRef.current   = setIsMyTurn;   }, []);
 
   useEffect(() => { const c = () => setIsMobile(window.innerWidth < 768); c(); window.addEventListener('resize', c); return () => window.removeEventListener('resize', c); }, []);
 
-  // Timer
+  // Timer — pauses during ZK proof generation
   useEffect(() => {
-    if (!gameStarted || gameOver || isVerifying || isCommitting) return;
+    if (!gameStarted || gameOver || isVerifying) return;
     const id = setInterval(() => {
       if (currentPlayerRef.current === 'white') {
         setWhiteTime(t => { if (t<=1){ setGameOver(true); setWinner('Black'); return 0; } return t-1; });
@@ -79,15 +122,15 @@ const LanternChess = () => {
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [gameStarted, gameOver]);
+  }, [gameStarted, gameOver, isVerifying]);
 
   // Supabase subscription
   useEffect(() => {
     if (!gameStarted) return;
     const unsub = subscribeMoves(sessionId, (move) => {
-      // Use refs so callback always has fresh values — never stale closure
       if (move.move_count <= lastProcessedMove.current) return;
       if (move.player === addressRef.current) return;
+      if (!executeMoveRef.current) return; // FIX: guard against stale ref
 
       lastProcessedMove.current = move.move_count;
       setOpponentOnline(true);
@@ -96,12 +139,10 @@ const LanternChess = () => {
       const opponentPiece = currentPieces.find(p => p.row === move.from_row && p.col === move.from_col);
       const targetPiece   = currentPieces.find(p => p.row === move.to_row   && p.col === move.to_col);
 
-
-      if (opponentPiece && executeMoveRef.current) {
+      if (opponentPiece) {
         executeMoveRef.current(opponentPiece.id, move.to_row, move.to_col, move.is_capture);
         if (addLogRef.current) addLogRef.current(`Opponent moved → [${move.to_row},${move.to_col}]`);
         setIsMyTurn(true);
-      } else {
       }
 
       if (move.is_capture && targetPiece?.type === 'king') {
@@ -112,22 +153,22 @@ const LanternChess = () => {
       }
     });
     return unsub;
-  }, [gameStarted, sessionId, address]);
+  }, [gameStarted, sessionId]);
 
   const showToast = useCallback((msg, type='default') => {
     setToast({ message: msg, type });
     setTimeout(() => setToast({ message: null, type: 'default' }), 2800);
   }, []);
 
-  const addLogRef = useRef(null);
   const addLog = useCallback((msg) => {
     setLogs(prev => [...prev, msg].slice(-15));
     if (window.innerWidth < 768) {
       const type = msg.startsWith('ERROR')||msg.startsWith('INVALID') ? 'error' : msg.startsWith('SUCCESS') ? 'success' : msg.startsWith('ZK') ? 'zk' : msg.startsWith('ON-CHAIN')||msg.startsWith('GAME OVER') ? 'chain' : 'default';
       if (type !== 'default') showToast(msg, type);
     }
-  addLogRef.current = addLog;
   }, [showToast]);
+  // FIX: sync ref in useEffect, NOT inside the callback body
+  useEffect(() => { addLogRef.current = addLog; }, [addLog]);
 
   const showInvalid = (msg) => { setInvalidMoveMsg(msg); showToast(`⚠ ${msg}`, 'error'); setTimeout(() => setInvalidMoveMsg(null), 2500); };
 
@@ -187,12 +228,37 @@ const LanternChess = () => {
   };
 
   const handleEndGame = async (whiteWon) => {
+    if (!address) return;
     try {
       addLog('Recording result on-chain...');
       const tx = await getClient().end_game({ session_id: sessionId, caller: address, player1_won: whiteWon });
       await signAndSubmit(tx);
-      addLog('Result recorded ✓');
-    } catch(e) { addLog('ERROR: Record failed'); }
+      addLog('Result recorded on-chain ✓');
+    } catch (e) {
+      addLog('ERROR: Result rejected — proof mismatch.');
+      showToast('⚠ Game result could not be verified on-chain', 'error');
+      console.error(e);
+    }
+  };
+
+  const handlePlayAgain = () => {
+    setGameOver(false);
+    setWinner(null);
+    setGameStarted(false);
+    setIsBoardSealed(false);
+    setMyColor(null);
+    myColorRef.current = null;
+    setIsMyTurn(false);
+    setWhiteTime(TURN_TIME);
+    setBlackTime(TURN_TIME);
+    setLogs(['Ready for new game']);
+    setSelectedPieceId(null);
+    setPlayer2Address('');
+    setJoinSessionId('');
+    setOpponentOnline(false);
+    lastProcessedMove.current = -1;
+    setSessionId(createSessionId());
+    setActiveTab('game');
   };
 
   const handleTileClick = async (row, col) => {
@@ -224,6 +290,16 @@ const LanternChess = () => {
 
         executeMove(movingPiece.id, row, col, isCapture);
         lastProcessedMove.current = moveCountRef.current + 1;
+
+        // FIX (main freeze): After executeMove, commitment is cleared (null) for the moved
+        // piece. Recompute it at the new position so the piece can be moved again later.
+        // Without this, any piece that has moved before throws "Piece has no commitment"
+        // and silently fails, making the game appear frozen.
+        const newSalt = Math.floor(Math.random() * 0xffffffff);
+        const newCommitment = await computeCommitment(row, col, newSalt);
+        setPieces(prev => prev.map(p =>
+          p.id === movingPiece.id ? { ...p, salt: newSalt, commitment: newCommitment } : p
+        ));
         setIsMyTurn(false);
         addLog(isCapture ? 'SUCCESS: Move sent — piece captured!' : 'SUCCESS: Move sent ✓');
 
@@ -240,12 +316,12 @@ const LanternChess = () => {
     }
   };
 
-  // Proximity map
-  const proximityMap = useMemo(() => {
-    const map = Array(8).fill(null).map(() => Array(8).fill(false));
-    const mine  = pieces.filter(p => p.color === myColor);
+  // threatMap: red = enemy can actually capture one of your pieces, grey = just visible
+  const threatMap = useMemo(() => {
+    const map      = Array(8).fill(null).map(() => Array(8).fill(false));
+    const myPieces = pieces.filter(p => p.color === myColor);
     pieces.filter(p => p.color !== myColor && myColor).forEach(enemy => {
-      if (mine.some(m => Math.abs(m.row-enemy.row)<=1 && Math.abs(m.col-enemy.col)<=1))
+      if (myPieces.some(mine => isValidMove(enemy, mine.row, mine.col, pieces).valid))
         map[enemy.row][enemy.col] = true;
     });
     return map;
@@ -256,7 +332,7 @@ const LanternChess = () => {
     const isSelected = selectedPieceId === piece?.id;
     const isOwnPiece = myColor ? piece?.color === myColor : piece?.color === currentPlayer;
     const isEnemy    = piece && !isOwnPiece;
-    const isNearby   = proximityMap[r][c];
+    const isThreat   = threatMap[r][c];
     const base       = (r+c)%2===0 ? '#1e2640' : '#252e4a';
 
     return (
@@ -272,12 +348,12 @@ const LanternChess = () => {
             </span>
           </div>
         )}
-        {isEnemy && isNearby && (
+        {isEnemy && isThreat && (
           <div className="z-20 flex items-center justify-center w-full h-full">
             <div className="w-3 h-3 rounded-full animate-pulse" style={{ background:'radial-gradient(circle,#ff4444 0%,#991111 100%)', boxShadow:'0 0 10px 3px rgba(255,50,50,0.7)' }}/>
           </div>
         )}
-        {isEnemy && !isNearby && (
+        {isEnemy && !isThreat && (
           <div className="z-20 flex items-center justify-center w-full h-full">
             <div className="w-2.5 h-2.5 rounded-full" style={{ background:'rgba(180,180,200,0.35)', border:'1px solid rgba(180,180,200,0.5)' }}/>
           </div>
@@ -325,8 +401,6 @@ const LanternChess = () => {
       {!gameStarted && isConnected && (
         <div className="bg-gray-900 p-4 rounded-lg border border-gray-800 space-y-3">
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider">Play</h3>
-
-          {/* Start new game */}
           <div className="space-y-2">
             <p className="text-[10px] text-gray-400 font-semibold">Start New Game</p>
             <div className="text-[10px] text-gray-500">Your Session ID:</div>
@@ -337,27 +411,26 @@ const LanternChess = () => {
             </div>
             <input type="text" placeholder="Player 2 address (G...)"
               value={player2Address} onChange={e => setPlayer2Address(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 rounded text-xs font-mono text-white placeholder-gray-500 border border-gray-700 focus:border-blue-500 outline-none"/>
+              className="w-full px-3 py-2 bg-gray-800 rounded text-xs text-white placeholder-gray-500 font-mono border border-gray-700 focus:border-blue-500 outline-none"/>
             <button onClick={handleStartGame} disabled={isCommitting}
-              className="w-full py-2.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 rounded-lg text-xs font-bold">
+              className="w-full py-2.5 text-white bg-green-700 hover:bg-green-600 disabled:opacity-50 rounded-lg text-xs font-bold">
               {isCommitting ? 'Setting up...' : 'Confirm & Start'}
             </button>
           </div>
-
           <div className="border-t border-gray-800 pt-3 space-y-2">
             <p className="text-[10px] text-gray-400 font-semibold">Join Existing Game</p>
             <input type="text" placeholder="Session ID from opponent"
               value={joinSessionId} onChange={e => setJoinSessionId(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 rounded text-xs font-mono text-white placeholder-gray-500 border border-gray-700 focus:border-blue-500 outline-none"/>
+              className="w-full px-3 py-2 bg-gray-800 text-white placeholder-gray-500 rounded text-xs font-mono border border-gray-700 focus:border-blue-500 outline-none"/>
             <button onClick={handleJoinGame} disabled={isCommitting}
-              className="w-full py-2.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 rounded-lg text-xs font-bold">
+              className="w-full py-2.5 text-white bg-blue-700 hover:bg-blue-600 disabled:opacity-50 rounded-lg text-xs font-bold">
               {isCommitting ? 'Joining...' : 'Join Game'}
             </button>
           </div>
         </div>
       )}
 
-      {/* Session ID after start (White shares with opponent) */}
+      {/* Session ID after start */}
       {gameStarted && myColor === 'white' && (
         <div className="bg-gray-900 p-4 rounded-lg border border-gray-800">
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Share with Opponent</h3>
@@ -381,11 +454,11 @@ const LanternChess = () => {
           <div className="mt-3 space-y-1.5">
             <div className="flex items-center gap-2 text-[10px] text-gray-400">
               <div className="w-3 h-3 rounded-full bg-red-500 shrink-0" style={{ boxShadow:'0 0 5px rgba(239,68,68,.8)' }}/>
-              <span>Enemy within 1 square</span>
+              <span>Enemy can take your piece</span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-gray-400">
               <div className="w-3 h-3 rounded-full shrink-0" style={{ background:'rgba(180,180,200,0.35)', border:'1px solid rgba(180,180,200,0.5)' }}/>
-              <span>Enemy far (position only)</span>
+              <span>Enemy visible, no threat</span>
             </div>
           </div>
         </div>
@@ -414,7 +487,6 @@ const LanternChess = () => {
   // ── MOBILE GAME TAB CONTENT ───────────────────────────────────────────────
   const MobileGameTab = () => (
     <div className="flex-1 overflow-y-auto p-3 space-y-3">
-      {/* Wallet */}
       <div className="bg-gray-900 p-3 rounded-lg border border-gray-800">
         <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Wallet</h3>
         {!isConnected ? (
@@ -441,7 +513,6 @@ const LanternChess = () => {
         )}
       </div>
 
-      {/* Start / Join */}
       {!gameStarted && isConnected && (
         <div className="bg-gray-900 p-3 rounded-lg border border-gray-800 space-y-3">
           <div className="space-y-2">
@@ -473,7 +544,6 @@ const LanternChess = () => {
         </div>
       )}
 
-      {/* Session ID after game starts */}
       {gameStarted && myColor === 'white' && (
         <div className="bg-gray-900 p-3 rounded-lg border border-gray-800">
           <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Share Session ID</h3>
@@ -485,7 +555,6 @@ const LanternChess = () => {
         </div>
       )}
 
-      {/* Game status */}
       {gameStarted && (
         <div className="bg-gray-900 p-3 rounded-lg border border-gray-800">
           <div className="flex items-center justify-between mb-2">
@@ -499,7 +568,6 @@ const LanternChess = () => {
         </div>
       )}
 
-      {/* Activity log */}
       <div className="bg-gray-900 p-3 rounded-lg border border-gray-800">
         <h3 className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Activity</h3>
         <div className="space-y-1">
@@ -519,7 +587,18 @@ const LanternChess = () => {
   );
 
   return (
-    <div className="w-screen h-screen overflow-hidden flex flex-col text-white" style={{ background:'#0d1117' }}>
+    <div className="w-screen h-screen overflow-hidden flex flex-col text-white relative" style={{ background:'#0d1117' }}>
+
+      {/* Game Over Overlay */}
+      {gameOver && winner && (
+        <GameOverOverlay
+          winner={winner}
+          myColor={myColor}
+          sessionId={sessionId}
+          onPlayAgain={handlePlayAgain}
+          onClose={() => { disconnect(); handlePlayAgain(); }}
+        />
+      )}
 
       {/* ── HEADER ────────────────────────────────────────────────────────── */}
       <div className="bg-gray-950 border-b border-gray-800 px-3 py-2 flex items-center justify-between shrink-0 gap-2">
@@ -537,7 +616,6 @@ const LanternChess = () => {
           {isCommitting && <span className="text-yellow-400 text-[9px] animate-pulse">…</span>}
         </div>
 
-        {/* Timers — center */}
         {gameStarted && (
           <div className="flex gap-1.5 shrink-0">
             <div className={`text-[10px] font-mono font-bold px-2 py-1 rounded border transition-colors ${currentPlayer==='white'?'border-blue-500/60 bg-blue-500/10 text-blue-300':'border-gray-800 text-gray-600'} ${whiteTimeLow&&currentPlayer==='white'?'text-red-400 animate-pulse border-red-500/60':''}`}>
@@ -549,7 +627,6 @@ const LanternChess = () => {
           </div>
         )}
 
-        {/* Wallet shorthand — desktop */}
         {isConnected && (
           <div className="hidden md:flex items-center gap-2 shrink-0">
             <span className="text-[10px] text-green-400 font-mono">{shortAddr}</span>
@@ -557,21 +634,16 @@ const LanternChess = () => {
         )}
       </div>
 
-      {/* ── MOBILE TABS (below header, above content) ─────────────────────── */}
+      {/* ── MOBILE TABS ───────────────────────────────────────────────────── */}
       {isMobile && (
         <div className="flex shrink-0 border-b border-gray-800 bg-gray-950">
-          <button
-            onClick={() => setActiveTab('board')}
-            className={`flex-1 py-2 text-xs font-bold transition-colors ${activeTab==='board'?'text-blue-400 border-b-2 border-blue-400':'text-gray-500'}`}
-          >
+          <button onClick={() => setActiveTab('board')}
+            className={`flex-1 py-2 text-xs font-bold transition-colors ${activeTab==='board'?'text-blue-400 border-b-2 border-blue-400':'text-gray-500'}`}>
             ♟ Board
           </button>
-          <button
-            onClick={() => setActiveTab('game')}
-            className={`flex-1 py-2 text-xs font-bold transition-colors relative ${activeTab==='game'?'text-blue-400 border-b-2 border-blue-400':'text-gray-500'}`}
-          >
+          <button onClick={() => setActiveTab('game')}
+            className={`flex-1 py-2 text-xs font-bold transition-colors relative ${activeTab==='game'?'text-blue-400 border-b-2 border-blue-400':'text-gray-500'}`}>
             ☰ Game
-            {/* dot indicator when it's your turn and on board tab */}
             {isMyTurn && activeTab==='board' && gameStarted && !gameOver && (
               <span className="absolute top-1.5 right-6 w-1.5 h-1.5 bg-green-400 rounded-full" />
             )}
@@ -589,7 +661,6 @@ const LanternChess = () => {
         </div>
       )}
 
-      {/* Toasts */}
       {invalidMoveMsg && !isMobile && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-red-700/90 backdrop-blur text-white text-xs font-bold px-4 py-2 rounded-lg shadow-xl border border-red-500/50">
           ⚠ {invalidMoveMsg}
@@ -600,7 +671,6 @@ const LanternChess = () => {
       {/* ── MAIN CONTENT ──────────────────────────────────────────────────── */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
 
-        {/* Board — hidden on mobile when game tab active */}
         <div className={`flex-1 flex items-center justify-center p-2 md:p-4 min-w-0 ${isMobile && activeTab==='game' ? 'hidden' : 'flex'}`}>
           <div className="rounded-sm"
             style={{
@@ -621,10 +691,8 @@ const LanternChess = () => {
           </div>
         </div>
 
-        {/* Mobile: Game tab content */}
         {isMobile && activeTab === 'game' && <MobileGameTab />}
 
-        {/* Desktop sidebar */}
         <div className="hidden md:flex w-72 shrink-0 flex-col gap-3 p-4 overflow-y-auto border-l border-gray-800">
           <SidebarContent />
         </div>

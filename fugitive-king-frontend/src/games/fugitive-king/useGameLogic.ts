@@ -1,5 +1,4 @@
 import { useState, useMemo, useCallback } from 'react';
-import { generateSalt } from './constants';
 import { isValidMove, isInCheck } from './chessLogic';
 import type { Piece, PieceColor, MoveResult } from './chessLogic';
 
@@ -100,9 +99,12 @@ export const useGameLogic = (initialPieces: Piece[]) => {
       let next: Piece[] = isCapture
         ? prev.filter(p => !(p.row === row && p.col === col && p.id !== pieceId))
         : prev;
+      // FIX: Do NOT wipe commitment here. Commitment is recomputed in LanternChess.jsx
+      // after the move (at the new position) so the piece can be moved again.
+      // Wiping it here was the root cause of "game freezes after ~5 moves".
       next = next.map(p =>
         p.id === pieceId
-          ? { ...p, row, col, salt: generateSalt(), commitment: null, hasMoved: true } as Piece
+          ? { ...p, row, col, hasMoved: true } as Piece
           : p
       );
       return next;
